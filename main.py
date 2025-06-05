@@ -38,7 +38,7 @@ AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 MESSAGE_THRESHOLD = 50
 VOICE_TIME_THRESHOLD = 250 * 3600
 
-INACTIVE_VOICE_THRESHOLD = 10 * 3600
+INACTIVE_VOICE_THRESHOLD = 10 * 3600  # 10 часов
 TIMER_DURATION = 15
 
 # DB Setup
@@ -122,6 +122,8 @@ async def check_all_users():
                 continue
             t_start = datetime.fromisoformat(t_start)
             if now - t_start >= timedelta(days=TIMER_DURATION):
+                if voice < INACTIVE_VOICE_THRESHOLD:
+                    role = guild.get_role(ACTIVE_ROLE_ID)
                     if role in member.roles:
                         await member.remove_roles(role)
                         if prev_role_id:
@@ -146,13 +148,10 @@ async def track_voice_time(member):
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
     check_all_users.start()
-    # При старте проверим всех участников с ролью и запустим таймеры
-    guild = discord.utils.get(bot.guilds)
-    active_role = guild.get_role(ACTIVE_ROLE_ID) if guild else None
-    if guild and active_role:
+    # Запуск отслеживания для тех, кто уже в голосе при старте
+    for guild in bot.guilds:
         for member in guild.members:
-            if active_role in member.roles:
-                update_timer(member.id)
+            if member.voice and member.voice.channel and member.voice.channel.name != AFK_CHANNEL_NAME:
                 bot.loop.create_task(track_voice_time(member))
 
 @bot.event
@@ -160,29 +159,22 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Игнорировать команды !stats !top !check
-    if message.content.startswith('!'):
-        if any(message.content.startswith(cmd) for cmd in ['!stats', '!top', '!check']):
-            await bot.process_commands(message)
-            return
-        # иначе считаем сообщение валидным для подсчета, если >3 символов
-        if len(message.content) < 3:
-            await bot.process_commands(message)
-            return
-    else:
-        # Для обычных сообщений — игнорировать если меньше 3 символов и без вложений
-        if len(message.content) < 3 and not (message.stickers or message.attachments or message.embeds):
-            await bot.process_commands(message)
-            return
+    # Игнорируем команды !stats !top !check
+    commands_to_ignore = ['!stats', '!top', '!check']
+    if any(message.content.startswith(cmd) for cmd in commands_to_ignore):
+        await bot.process_commands(message)
+        return
 
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (message.author.id,))
-    c.execute('UPDATE users SET messages = messages + 1 WHERE user_id = ?', (message.author.id,))
-    conn.commit()
-    conn.close()
+    # Учитываем сообщения с 3 и более символами, картинки, стикеры и гифки
+    if len(message.content) >= 3 or message.stickers or message.attachments:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (message.author.id,))
+        c.execute('UPDATE users SET messages = messages + 1 WHERE user_id = ?', (message.author.id,))
+        conn.commit()
+        conn.close()
+        await check_role(message.author)
 
-    await check_role(message.author)
     await bot.process_commands(message)
 
 @bot.event
@@ -201,13 +193,18 @@ async def stats(ctx):
     conn.close()
     if row:
         msg, voice = row
-        await ctx.send(f"{ctx.author.mention}, у тебя {msg} сообщений и {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
+        await ctx.send(f"{ctx.author.name} — {msg} сообщений, {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
     else:
         await ctx.send("Данных нет.")
 
 @bot.command()
 async def check(ctx, member: discord.Member = None):
     member = member or ctx.author
+    # Проверяем, есть ли у пользователя защищённые роли
+    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+        await ctx.send(f"{member.name}, ты крутой, сиди и дальше чухай жопу.")
+        return
+
     await check_role(member)
     conn = get_db_connection()
     c = conn.cursor()
@@ -216,13 +213,13 @@ async def check(ctx, member: discord.Member = None):
     conn.close()
 
     if not row:
-        await ctx.send(f"Нет данных по {member.display_name}.")
+        await ctx.send(f"Нет данных по {member.name}.")
         return
 
     msg, voice, t_start = row
     has_role = discord.utils.get(member.roles, id=ACTIVE_ROLE_ID)
 
-    response = f"📊 Статистика {member.display_name}:\n"
+    response = f"📊 Статистика {member.name}:\n"
     response += f"— {msg} сообщений\n— {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых\n"
 
     if has_role:
@@ -230,7 +227,7 @@ async def check(ctx, member: discord.Member = None):
             delta = datetime.utcnow() - datetime.fromisoformat(t_start)
             days_left = max(0, TIMER_DURATION - delta.days)
             response += f"— До снятия роли: {days_left} дней\n"
-            response += f"— Нужно набрать: 10 часов в голосе за период"
+            response += f"— Нужно набрать: 20 сообщений и 20 часов в голосе за период"
         else:
             response += "— Роль активна, но таймер не запущен."
     else:
@@ -242,19 +239,46 @@ async def check(ctx, member: discord.Member = None):
 async def top(ctx):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + voice_time / 60 * 3) DESC LIMIT 5')
+    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time // 60) * 3) DESC LIMIT 5')
     rows = c.fetchall()
     conn.close()
-    if not rows:
-        await ctx.send("Нет данных для топа.")
-        return
 
-    response = "🏆 Топ по активности:\n"
-    for i, (user_id, messages, voice_time) in enumerate(rows, start=1):
-        member = ctx.guild.get_member(user_id)
+    guild = ctx.guild
+    embed = discord.Embed(title="Топ 5 участников", color=0x00ff00)
+    for i, (user_id, messages, voice_time) in enumerate(rows, 1):
+        member = guild.get_member(user_id)
         if member:
             score = messages + (voice_time // 60) * 3
-            response += f"{i}. {member.display_name} — {messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых (баллы: {score})\n"
-    await ctx.send(response)
+            embed.add_field(name=f"{i}. {member.display_name}", value=f"{messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых, оценка: {score}", inline=False)
+
+    await ctx.send(embed=embed)
+
+# Команда !editrole
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def editrole(ctx):
+    guild = ctx.guild
+    role_to_add = guild.get_role(1266456229945937983)
+    role_check_1 = 1266456229945937983
+    role_check_2 = 1379573779839189022
+
+    if not role_to_add:
+        await ctx.send("Роль для выдачи не найдена!")
+        return
+
+    count = 0
+    async with ctx.typing():
+        for member in guild.members:
+            has_role_1 = any(r.id == role_check_1 for r in member.roles)
+            has_role_2 = any(r.id == role_check_2 for r in member.roles)
+
+            if not has_role_1 and not has_role_2:
+                try:
+                    await member.add_roles(role_to_add)
+                    count += 1
+                except Exception as e:
+                    print(f"Ошибка при добавлении роли {member}: {e}")
+
+    await ctx.send(f"Роль выдана {count} участникам, у которых не было ролей {role_check_1} и {role_check_2}.")
 
 bot.run(token)
