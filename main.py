@@ -38,6 +38,7 @@ AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 MESSAGE_THRESHOLD = 50
 VOICE_TIME_THRESHOLD = 250 * 3600
 
+INACTIVE_MSG_THRESHOLD = 20
 INACTIVE_VOICE_THRESHOLD = 20 * 3600
 TIMER_DURATION = 15
 
@@ -210,12 +211,6 @@ async def stats(ctx):
 @bot.command()
 async def check(ctx, member: discord.Member = None):
     member = member or ctx.author
-
-    # Проверяем наличие защищённых ролей
-    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
-        await ctx.send(f"{member.mention}, ты крутой, сиди и дальше чухай жопу")
-        return
-
     await check_role(member)
     conn = get_db_connection()
     c = conn.cursor()
@@ -224,13 +219,13 @@ async def check(ctx, member: discord.Member = None):
     conn.close()
 
     if not row:
-        await ctx.send(f"Нет данных по {member.mention}.")
+        await ctx.send(f"Нет данных по {member.display_name}.")
         return
 
     msg, voice, t_start = row
     has_role = discord.utils.get(member.roles, id=ACTIVE_ROLE_ID)
 
-    response = f"📊 Статистика {member.mention}:\n"
+    response = f"📊 Статистика {member.display_name}:\n"
     response += f"— {msg} сообщений\n— {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых\n"
 
     if has_role:
@@ -250,19 +245,20 @@ async def check(ctx, member: discord.Member = None):
 async def top(ctx):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + voice_time / 60 * 3) DESC LIMIT 5')
+    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time/60)*3) DESC LIMIT 5')
     rows = c.fetchall()
     conn.close()
+
     if not rows:
         await ctx.send("Нет данных для топа.")
         return
 
     response = "🏆 Топ по активности:\n"
-    for i, (user_id, messages, voice_time) in enumerate(rows, start=1):
+    for user_id, messages, voice_time in rows:
         member = ctx.guild.get_member(user_id)
         if member:
             score = messages + (voice_time // 60) * 3
-            response += f"{i}. {member.display_name} — {messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых (оценка: {score})\n"
+            response += f"{member.display_name} — {messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых (оценка: {score})\n"
     await ctx.send(response)
 
 bot.run(token)
