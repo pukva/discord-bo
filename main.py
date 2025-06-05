@@ -32,7 +32,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 DB_NAME = 'user_stats.db'
 ACTIVE_ROLE_ID = 1060759821856555119
 OLD_ROLE_IDS = [1379573779839189022, 1266456229945937983]
-PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]  # роли, которые не трогаем
+PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]
 AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 
 MESSAGE_THRESHOLD = 50
@@ -84,10 +84,6 @@ async def check_role(member):
     active_role = member.guild.get_role(ACTIVE_ROLE_ID)
     old_roles = [member.guild.get_role(rid) for rid in OLD_ROLE_IDS]
     has_active = active_role in member.roles if active_role else False
-
-    # Если у участника есть роли из PROTECTED, не трогаем
-    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
-        return
 
     if messages >= MESSAGE_THRESHOLD and voice_time >= VOICE_TIME_THRESHOLD:
         if active_role and not has_active:
@@ -153,11 +149,13 @@ async def track_voice_time(member):
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
     check_all_users.start()
-    # При старте запустим таймеры для всех в голосе
+    # При старте проверим всех участников с ролью и запустим таймеры
     guild = discord.utils.get(bot.guilds)
-    if guild:
+    active_role = guild.get_role(ACTIVE_ROLE_ID) if guild else None
+    if guild and active_role:
         for member in guild.members:
-            if member.voice and member.voice.channel and member.voice.channel.name != AFK_CHANNEL_NAME and not member.bot:
+            if active_role in member.roles:
+                update_timer(member.id)
                 bot.loop.create_task(track_voice_time(member))
 
 @bot.event
@@ -165,18 +163,19 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    content = message.content.strip()
-    # Игнорируем команды !stats, !top, !check
-    if content.startswith('!'):
-        cmd = content.split(' ')[0].lower()
-        if cmd in ('!stats', '!top', '!check'):
+    # Игнорировать команды !stats !top !check
+    if message.content.startswith('!'):
+        if any(message.content.startswith(cmd) for cmd in ['!stats', '!top', '!check']):
             await bot.process_commands(message)
             return
-        else:
-            if len(content) < 3:
-                return
+        # иначе считаем сообщение валидным для подсчета, если >3 символов
+        if len(message.content) < 3:
+            await bot.process_commands(message)
+            return
     else:
-        if len(content) < 3 and not message.attachments and not message.stickers:
+        # Для обычных сообщений — игнорировать если меньше 3 символов и без вложений
+        if len(message.content) < 3 and not (message.stickers or message.attachments or message.embeds):
+            await bot.process_commands(message)
             return
 
     conn = get_db_connection()
@@ -185,6 +184,7 @@ async def on_message(message):
     c.execute('UPDATE users SET messages = messages + 1 WHERE user_id = ?', (message.author.id,))
     conn.commit()
     conn.close()
+
     await check_role(message.author)
     await bot.process_commands(message)
 
@@ -204,7 +204,7 @@ async def stats(ctx):
     conn.close()
     if row:
         msg, voice = row
-        await ctx.send(f"{ctx.author.display_name}, у тебя {msg} сообщений и {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
+        await ctx.send(f"{ctx.author.mention}, у тебя {msg} сообщений и {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
     else:
         await ctx.send("Данных нет.")
 
@@ -245,7 +245,7 @@ async def check(ctx, member: discord.Member = None):
 async def top(ctx):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time/60)*3) DESC LIMIT 10')
+    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time/60)*3) DESC LIMIT 5')
     rows = c.fetchall()
     conn.close()
 
