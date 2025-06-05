@@ -1,39 +1,24 @@
-from flask import Flask, render_template
+import discord
+from discord.ext import commands, tasks
 import sqlite3
-import logging
+from datetime import datetime, timedelta
+import asyncio
+import os
+from dotenv import load_dotenv
+from threading import Thread
+from flask import Flask
 
-logging.basicConfig(filename='flask_errors.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-app = Flask(__name__)
+# Load token
+load_dotenv()
+token = os.getenv("DISCORD_TOKEN")
 
-def get_db_connection():
-    conn = sqlite3.connect('user_stats.db', check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
-
+# Flask server (for keep-alive)
+app = Flask('')
 @app.route('/')
 def home():
-    logging.debug("Запрос к /")
     return "Бот работает!"
-
-@app.route('/users')
-def users():
-    try:
-        logging.debug("Запрос к /users")
-        conn = get_db_connection()
-        users = conn.execute('SELECT user_id, messages, voice_time FROM users').fetchall()
-        logging.debug(f"Найдено пользователей: {len(users)}")
-        for user in users:
-            logging.debug(f"User: {user['user_id']}, Messages: {user['messages']}, Voice Time: {user['voice_time']}")
-        conn.close()
-        return render_template('users.html', users=users)
-    except Exception as e:
-        logging.error(f"Ошибка в маршруте /users: {str(e)}")
-        return f"Ошибка сервера: {str(e)}", 500
-
 def run():
-    logging.debug("Запуск Flask-сервера...")
-    app.run(host='0.0.0.0', port=8080, debug=True)
-
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 Thread(target=run).start()
 
 # Intents
