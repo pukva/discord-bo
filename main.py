@@ -227,7 +227,7 @@ async def check(ctx, member: discord.Member = None):
             delta = datetime.utcnow() - datetime.fromisoformat(t_start)
             days_left = max(0, TIMER_DURATION - delta.days)
             response += f"— До снятия роли: {days_left} дней\n"
-            response += f"— Нужно набрать: 20 сообщений и 20 часов в голосе за период"
+            response += f"— Нужно набрать:10 часов в голосе за период"
         else:
             response += "— Роль активна, но таймер не запущен."
     else:
