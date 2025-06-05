@@ -253,32 +253,4 @@ async def top(ctx):
 
     await ctx.send(embed=embed)
 
-# Команда !editrole
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def editrole(ctx):
-    guild = ctx.guild
-    role_to_add = guild.get_role(1266456229945937983)
-    role_check_1 = 1266456229945937983
-    role_check_2 = 1379573779839189022
-
-    if not role_to_add:
-        await ctx.send("Роль для выдачи не найдена!")
-        return
-
-    count = 0
-    async with ctx.typing():
-        for member in guild.members:
-            has_role_1 = any(r.id == role_check_1 for r in member.roles)
-            has_role_2 = any(r.id == role_check_2 for r in member.roles)
-
-            if not has_role_1 and not has_role_2:
-                try:
-                    await member.add_roles(role_to_add)
-                    count += 1
-                except Exception as e:
-                    print(f"Ошибка при добавлении роли {member}: {e}")
-
-    await ctx.send(f"Роль выдана {count} участникам, у которых не было ролей {role_check_1} и {role_check_2}.")
-
 bot.run(token)
