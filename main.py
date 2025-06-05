@@ -6,20 +6,54 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from threading import Thread
-from flask import Flask
+from flask import Flask, render_template
+
+# Название базы данных
+DB_NAME = 'user_stats.db'
 
 # Load token
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
 
-# Flask server (for keep-alive)
+# Flask сервер (для keep-alive и страницы пользователей)
 app = Flask('')
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 @app.route('/')
 def home():
     return "Бот работает!"
-def run():
+
+@app.route('/users')
+def users():
+    conn = get_db_connection()
+    users = conn.execute('SELECT user_id, messages, voice_time FROM users').fetchall()
+    conn.close()
+    return render_template('users.html', users=users)
+
+def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-Thread(target=run).start()
+
+Thread(target=run_flask).start()
+
+# Инициализация БД
+def init_db():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        messages INTEGER DEFAULT 0,
+        voice_time INTEGER DEFAULT 0,
+        timer_start TEXT,
+        prev_role_id INTEGER
+    )''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 # Intents
 intents = discord.Intents.default()
