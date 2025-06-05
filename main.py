@@ -261,7 +261,7 @@ async def top(ctx):
         member = ctx.guild.get_member(user_id)
         if member:
             score = messages + (voice_time // 60) * 3
-            response += f"{i}. {member.display_name} — {messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых (оценка: {score})\n"
+            response += f"{i}. {member.display_name} — {messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых (баллы: {score})\n"
     await ctx.send(response)
 
 bot.run(token)
