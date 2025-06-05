@@ -245,20 +245,19 @@ async def check(ctx, member: discord.Member = None):
 async def top(ctx):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time/60)*3) DESC LIMIT 5')
+    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + voice_time / 60 * 3) DESC LIMIT 5')
     rows = c.fetchall()
     conn.close()
-
     if not rows:
         await ctx.send("Нет данных для топа.")
         return
 
     response = "🏆 Топ по активности:\n"
-    for user_id, messages, voice_time in rows:
+    for i, (user_id, messages, voice_time) in enumerate(rows, start=1):
         member = ctx.guild.get_member(user_id)
         if member:
             score = messages + (voice_time // 60) * 3
-            response += f"{member.display_name} — {messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых (оценка: {score})\n"
+            response += f"{i}. {member.display_name} — {messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых (оценка: {score})\n"
     await ctx.send(response)
 
 bot.run(token)
