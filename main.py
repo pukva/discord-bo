@@ -38,7 +38,6 @@ AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 MESSAGE_THRESHOLD = 50
 VOICE_TIME_THRESHOLD = 250 * 3600
 
-INACTIVE_MSG_THRESHOLD = 20
 INACTIVE_VOICE_THRESHOLD = 10 * 3600
 TIMER_DURATION = 15
 
@@ -123,8 +122,6 @@ async def check_all_users():
                 continue
             t_start = datetime.fromisoformat(t_start)
             if now - t_start >= timedelta(days=TIMER_DURATION):
-                if msg < INACTIVE_MSG_THRESHOLD or voice < INACTIVE_VOICE_THRESHOLD:
-                    role = guild.get_role(ACTIVE_ROLE_ID)
                     if role in member.roles:
                         await member.remove_roles(role)
                         if prev_role_id:
@@ -233,7 +230,7 @@ async def check(ctx, member: discord.Member = None):
             delta = datetime.utcnow() - datetime.fromisoformat(t_start)
             days_left = max(0, TIMER_DURATION - delta.days)
             response += f"— До снятия роли: {days_left} дней\n"
-            response += f"— Нужно набрать: 20 сообщений и 20 часов в голосе за период"
+            response += f"— Нужно набрать: 10 часов в голосе за период"
         else:
             response += "— Роль активна, но таймер не запущен."
     else:
