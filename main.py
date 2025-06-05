@@ -14,6 +14,7 @@ token = os.getenv("DISCORD_TOKEN")
 
 # Flask server (for keep-alive)
 app = Flask('')
+app.debug = True
 @app.route('/')
 def home():
     return "Бот работает!"
