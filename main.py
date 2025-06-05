@@ -210,6 +210,12 @@ async def stats(ctx):
 @bot.command()
 async def check(ctx, member: discord.Member = None):
     member = member or ctx.author
+
+    # Проверяем наличие защищённых ролей
+    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+        await ctx.send(f"{member.mention}, ты крутой, сиди и дальше чухай жопу")
+        return
+
     await check_role(member)
     conn = get_db_connection()
     c = conn.cursor()
@@ -218,13 +224,13 @@ async def check(ctx, member: discord.Member = None):
     conn.close()
 
     if not row:
-        await ctx.send(f"Нет данных по {member.display_name}.")
+        await ctx.send(f"Нет данных по {member.mention}.")
         return
 
     msg, voice, t_start = row
     has_role = discord.utils.get(member.roles, id=ACTIVE_ROLE_ID)
 
-    response = f"📊 Статистика {member.display_name}:\n"
+    response = f"📊 Статистика {member.mention}:\n"
     response += f"— {msg} сообщений\n— {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых\n"
 
     if has_role:
@@ -232,7 +238,7 @@ async def check(ctx, member: discord.Member = None):
             delta = datetime.utcnow() - datetime.fromisoformat(t_start)
             days_left = max(0, TIMER_DURATION - delta.days)
             response += f"— До снятия роли: {days_left} дней\n"
-            response += f"— Нужно набрать:10 часов в голосе за период"
+            response += f"— Нужно набрать: 20 сообщений и 20 часов в голосе за период"
         else:
             response += "— Роль активна, но таймер не запущен."
     else:
