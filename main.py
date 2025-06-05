@@ -15,39 +15,34 @@ app = Flask('')
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
 
-# Flask server (for keep-alive)
+from flask import Flask
+from threading import Thread
+
 app = Flask('')
 app.debug = True
+
 @app.route('/')
 def home():
     return "Бот работает!"
 
-# -- Новый роут для статистики --
 @app.route("/users")
 def users():
+    import sqlite3
     conn = sqlite3.connect('user_stats.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id, username, messages, voice_time FROM users")
-    users_list = cursor.fetchall()
+    cursor.execute("SELECT user_id, username, messages FROM users")
+    rows = cursor.fetchall()
     conn.close()
-    # HTML-шаблон для вывода таблицы
-    table = """
-    <h2>Users stats</h2>
-    <table border=1>
-    <tr><th>ID</th><th>Username</th><th>Messages</th><th>Voice Time (sec)</th></tr>
-    {% for user_id, username, messages, voice_time in users %}
-        <tr>
-            <td>{{ user_id }}</td>
-            <td>{{ username }}</td>
-            <td>{{ messages }}</td>
-            <td>{{ voice_time }}</td>
-        </tr>
-    {% endfor %}
-    </table>
-    """
-    return render_template_string(table, users=users_list)
-Thread(target=run).start()
+    html = "<table border='1'><tr><th>ID</th><th>Username</th><th>Messages</th></tr>"
+    for row in rows:
+        html += f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td></tr>"
+    html += "</table>"
+    return html
 
+def run():
+    app.run(host="0.0.0.0", port=8080)
+
+Thread(target=run).start()
 # Intents
 intents = discord.Intents.default()
 intents.message_content = True
