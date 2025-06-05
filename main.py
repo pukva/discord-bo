@@ -211,6 +211,11 @@ async def stats(ctx):
 @bot.command()
 async def check(ctx, member: discord.Member = None):
     member = member or ctx.author
+
+    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+        await ctx.send(f"{member.display_name}, ты крутой, сиди и дальше чухай жопу.")
+        return
+
     await check_role(member)
     conn = get_db_connection()
     c = conn.cursor()
