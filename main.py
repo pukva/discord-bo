@@ -195,17 +195,20 @@ async def on_voice_state_update(member, before, after):
         bot.loop.create_task(track_voice_time(member))
 
 @bot.command()
-async def stats(ctx):
+async def stats(ctx, member: discord.Member = None):
+    member = member or ctx.author
+
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT messages, voice_time FROM users WHERE user_id = ?', (ctx.author.id,))
+    c.execute('SELECT messages, voice_time FROM users WHERE user_id = ?', (member.id,))
     row = c.fetchone()
     conn.close()
+
     if row:
         msg, voice = row
-        await ctx.send(f"{ctx.author.mention}, у тебя {msg} сообщений и {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
+        await ctx.send(f"{member.mention}, у тебя {msg} сообщений и {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
     else:
-        await ctx.send("Данных нет.")
+        await ctx.send(f"Данных по {member.display_name} нет.")
 
 @bot.command()
 async def check(ctx, member: discord.Member = None):
