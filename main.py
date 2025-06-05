@@ -32,7 +32,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 DB_NAME = 'user_stats.db'
 ACTIVE_ROLE_ID = 1060759821856555119
 OLD_ROLE_IDS = [1379573779839189022, 1266456229945937983]
-PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]
+PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]  # Роли, которые нельзя трогать
 AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 
 MESSAGE_THRESHOLD = 50
@@ -49,21 +49,14 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    # Создаём таблицу если её нет (без prev_role_id для существующей таблицы)
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         messages INTEGER DEFAULT 0,
         voice_time INTEGER DEFAULT 0,
-        timer_start TEXT
+        timer_start TEXT,
+        prev_role_id INTEGER
     )''')
     conn.commit()
-    # Пытаемся добавить колонку prev_role_id, если она отсутствует
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN prev_role_id INTEGER")
-        conn.commit()
-    except sqlite3.OperationalError:
-        # Колонка уже существует, игнорируем ошибку
-        pass
     conn.close()
 
 init_db()
@@ -193,6 +186,12 @@ async def stats(ctx):
 @bot.command()
 async def check(ctx, member: discord.Member = None):
     member = member or ctx.author
+
+    # Проверка защищённых ролей
+    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+        await ctx.send(f"{member.mention}, ты крутой, сиди и дальше чухай жопу")
+        return
+
     await check_role(member)
     conn = get_db_connection()
     c = conn.cursor()
