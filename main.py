@@ -6,7 +6,7 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from threading import Thread
-ffrom flask import Flask
+from flask import Flask
 from threading import Thread
 
 app = Flask('')  # только один раз!
