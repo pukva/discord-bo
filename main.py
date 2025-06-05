@@ -32,7 +32,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 DB_NAME = 'user_stats.db'
 ACTIVE_ROLE_ID = 1060759821856555119
 OLD_ROLE_IDS = [1379573779839189022, 1266456229945937983]
-PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]  # Можешь добавить ID ролей, которые не трогать
+PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]
 AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 
 MESSAGE_THRESHOLD = 50
@@ -49,14 +49,21 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
+    # Создаём таблицу если её нет (без prev_role_id для существующей таблицы)
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         messages INTEGER DEFAULT 0,
         voice_time INTEGER DEFAULT 0,
-        timer_start TEXT,
-        prev_role_id INTEGER
+        timer_start TEXT
     )''')
     conn.commit()
+    # Пытаемся добавить колонку prev_role_id, если она отсутствует
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN prev_role_id INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Колонка уже существует, игнорируем ошибку
+        pass
     conn.close()
 
 init_db()
