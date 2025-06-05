@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import asyncio
 import os
 from dotenv import load_dotenv
+token = os.getenv("DISCORD_TOKEN")
 from threading import Thread
 from flask import Flask
 from threading import Thread
@@ -20,7 +21,7 @@ def users():
     return "ТЕСТ: /users работает!"
 
 def run():
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=False)
 
 Thread(target=run).start()
 # Intents
