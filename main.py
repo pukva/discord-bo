@@ -7,6 +7,9 @@ import os
 from dotenv import load_dotenv
 from threading import Thread
 from flask import Flask, render_template_string
+import sqlite3
+
+app = Flask('')
 
 # Load token
 load_dotenv()
@@ -20,46 +23,28 @@ def home():
     return "Бот работает!"
 
 # -- Новый роут для статистики --
-@app.route('/users')
+@app.route("/users")
 def users():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('SELECT user_id, username, messages, voice_time FROM users ORDER BY messages DESC')
-    rows = c.fetchall()
+    conn = sqlite3.connect('user_stats.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, username, count FROM users")
+    users_list = cursor.fetchall()
     conn.close()
-    html = """
-    <html>
-    <head>
-        <title>Статистика пользователей</title>
-        <style>
-          table { border-collapse: collapse; width: 80%; margin: 30px auto; }
-          th, td { border: 1px solid #444; padding: 8px 12px; }
-          th { background: #eee; }
-        </style>
-    </head>
-    <body>
-        <h2 style="text-align:center;">Статистика пользователей Discord</h2>
-        <table>
-            <tr>
-                <th>User ID</th>
-                <th>Username</th>
-                <th>Messages</th>
-                <th>Voice Time (часы)</th>
-            </tr>
-            {% for user_id, username, messages, voice_time in rows %}
-            <tr>
-                <td>{{ user_id }}</td>
-                <td>{{ username or '' }}</td>
-                <td>{{ messages }}</td>
-                <td>{{ (voice_time // 3600) }}</td>
-            </tr>
-            {% endfor %}
-        </table>
-    </body>
-    </html>
+    # HTML-шаблон для вывода таблицы
+    table = """
+    <h2>Users stats</h2>
+    <table border=1>
+    <tr><th>ID</th><th>Username</th><th>Count</th></tr>
+    {% for user_id, username, count in users %}
+        <tr>
+            <td>{{ user_id }}</td>
+            <td>{{ username }}</td>
+            <td>{{ count }}</td>
+        </tr>
+    {% endfor %}
+    </table>
     """
-    return render_template_string(html, rows=rows)
-
+    return render_template_string(table, users=users_list)
 def run():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 Thread(target=run).start()
