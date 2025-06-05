@@ -27,19 +27,20 @@ def home():
 def users():
     conn = sqlite3.connect('user_stats.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id, username, count FROM users")
+    cursor.execute("SELECT user_id, username, messages, voice_time FROM users")
     users_list = cursor.fetchall()
     conn.close()
     # HTML-шаблон для вывода таблицы
     table = """
     <h2>Users stats</h2>
     <table border=1>
-    <tr><th>ID</th><th>Username</th><th>Count</th></tr>
-    {% for user_id, username, count in users %}
+    <tr><th>ID</th><th>Username</th><th>Messages</th><th>Voice Time (sec)</th></tr>
+    {% for user_id, username, messages, voice_time in users %}
         <tr>
             <td>{{ user_id }}</td>
             <td>{{ username }}</td>
-            <td>{{ count }}</td>
+            <td>{{ messages }}</td>
+            <td>{{ voice_time }}</td>
         </tr>
     {% endfor %}
     </table>
