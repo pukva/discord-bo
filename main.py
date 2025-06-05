@@ -6,7 +6,7 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from threading import Thread
-from flask import Flask
+from flask import Flask, render_template_string
 
 # Load token
 load_dotenv()
@@ -17,6 +17,48 @@ app = Flask('')
 @app.route('/')
 def home():
     return "Бот работает!"
+
+# -- Новый роут для статистики --
+@app.route('/users')
+def users():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('SELECT user_id, username, messages, voice_time FROM users ORDER BY messages DESC')
+    rows = c.fetchall()
+    conn.close()
+    html = """
+    <html>
+    <head>
+        <title>Статистика пользователей</title>
+        <style>
+          table { border-collapse: collapse; width: 80%; margin: 30px auto; }
+          th, td { border: 1px solid #444; padding: 8px 12px; }
+          th { background: #eee; }
+        </style>
+    </head>
+    <body>
+        <h2 style="text-align:center;">Статистика пользователей Discord</h2>
+        <table>
+            <tr>
+                <th>User ID</th>
+                <th>Username</th>
+                <th>Messages</th>
+                <th>Voice Time (часы)</th>
+            </tr>
+            {% for user_id, username, messages, voice_time in rows %}
+            <tr>
+                <td>{{ user_id }}</td>
+                <td>{{ username or '' }}</td>
+                <td>{{ messages }}</td>
+                <td>{{ (voice_time // 3600) }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </body>
+    </html>
+    """
+    return render_template_string(html, rows=rows)
+
 def run():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 Thread(target=run).start()
@@ -39,6 +81,7 @@ MESSAGE_THRESHOLD = 50
 VOICE_TIME_THRESHOLD = 250 * 3600
 
 INACTIVE_VOICE_THRESHOLD = 20 * 3600
+INACTIVE_MSG_THRESHOLD = 10  # Добавь, если не было
 TIMER_DURATION = 15
 
 # DB Setup
@@ -50,6 +93,7 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
+        username TEXT,
         messages INTEGER DEFAULT 0,
         voice_time INTEGER DEFAULT 0,
         timer_start TEXT,
@@ -139,12 +183,13 @@ async def track_voice_time(member):
         conn = get_db_connection()
         c = conn.cursor()
         c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (member.id,))
+        # --- Новое: сохраняем username
+        c.execute('UPDATE users SET username=? WHERE user_id=?', (member.display_name, member.id))
         c.execute('UPDATE users SET voice_time = voice_time + 60 WHERE user_id = ?', (member.id,))
         conn.commit()
         conn.close()
         await check_role(member)
 
-@bot.event
 @bot.event
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
@@ -182,6 +227,8 @@ async def on_message(message):
     conn = get_db_connection()
     c = conn.cursor()
     c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (message.author.id,))
+    # --- Новое: сохраняем username
+    c.execute('UPDATE users SET username=? WHERE user_id=?', (message.author.display_name, message.author.id))
     c.execute('UPDATE users SET messages = messages + 1 WHERE user_id = ?', (message.author.id,))
     conn.commit()
     conn.close()
