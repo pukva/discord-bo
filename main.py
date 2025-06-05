@@ -145,17 +145,19 @@ async def track_voice_time(member):
         await check_role(member)
 
 @bot.event
+@bot.event
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
     check_all_users.start()
-    # При старте проверим всех участников с ролью и запустим таймеры
-    guild = discord.utils.get(bot.guilds)
-    active_role = guild.get_role(ACTIVE_ROLE_ID) if guild else None
-    if guild and active_role:
-        for member in guild.members:
-            if active_role in member.roles:
-                update_timer(member.id)
-                bot.loop.create_task(track_voice_time(member))
+
+    for guild in bot.guilds:
+        for voice_channel in guild.voice_channels:
+            for member in voice_channel.members:
+                if member.bot:
+                    continue
+                if voice_channel.name != AFK_CHANNEL_NAME:
+                    print(f"▶️ Запуск отслеживания для {member.display_name} (уже в голосе)")
+                    bot.loop.create_task(track_voice_time(member))
 
 @bot.event
 async def on_message(message):
