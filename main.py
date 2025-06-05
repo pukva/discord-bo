@@ -12,6 +12,13 @@ from flask import Flask
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
 
+# --- Логирование ---
+def log_activity(text):
+    os.makedirs("logs", exist_ok=True)
+    with open("logs/activity.log", "a", encoding="utf-8") as f:
+        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"[{timestamp} UTC] {text}\n")
+
 # Flask server (for keep-alive)
 app = Flask('')
 @app.route('/')
@@ -68,6 +75,7 @@ def update_timer(user_id):
     c.execute('UPDATE users SET timer_start = ? WHERE user_id = ?', (now, user_id))
     conn.commit()
     conn.close()
+    log_activity(f"Timer updated for user {user_id}")
 
 async def check_role(member):
     conn = get_db_connection()
@@ -92,6 +100,7 @@ async def check_role(member):
                         prev_role_id = r.id
                         await member.remove_roles(r)
                 await member.add_roles(active_role)
+                log_activity(f"User {member.display_name} ({member.id}) granted Active role")
                 conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('UPDATE users SET prev_role_id = ? WHERE user_id = ?', (prev_role_id, member.id))
@@ -99,6 +108,7 @@ async def check_role(member):
                 conn.close()
                 update_timer(member.id)
             except Exception as e:
+                log_activity(f"Error granting role to {member.display_name} ({member.id}): {e}")
                 print(e)
         elif has_active and not timer_start:
             update_timer(member.id)
@@ -122,15 +132,17 @@ async def check_all_users():
                 continue
             t_start = datetime.fromisoformat(t_start)
             if now - t_start >= timedelta(days=TIMER_DURATION):
-                if msg < INACTIVE_MSG_THRESHOLD or voice < INACTIVE_VOICE_THRESHOLD:
+                if msg < MESSAGE_THRESHOLD or voice < INACTIVE_VOICE_THRESHOLD:
                     role = guild.get_role(ACTIVE_ROLE_ID)
                     if role in member.roles:
                         await member.remove_roles(role)
+                        log_activity(f"User {member.display_name} ({member.id}) lost Active role due to inactivity")
                         if prev_role_id:
                             old_role = guild.get_role(prev_role_id)
                             if old_role:
                                 await member.add_roles(old_role)
         except Exception as e:
+            log_activity(f"Timer error for user {user_id}: {e}")
             print(f"Ошибка таймера: {e}")
 
 async def track_voice_time(member):
@@ -145,9 +157,9 @@ async def track_voice_time(member):
         await check_role(member)
 
 @bot.event
-@bot.event
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
+    log_activity(f"Bot started as {bot.user}")
     check_all_users.start()
 
     for guild in bot.guilds:
@@ -156,7 +168,7 @@ async def on_ready():
                 if member.bot:
                     continue
                 if voice_channel.name != AFK_CHANNEL_NAME:
-                    print(f"▶️ Запуск отслеживания для {member.display_name} (уже в голосе)")
+                    log_activity(f"Start tracking voice time for {member.display_name} ({member.id}) on bot start")
                     bot.loop.create_task(track_voice_time(member))
 
 @bot.event
@@ -186,6 +198,8 @@ async def on_message(message):
     conn.commit()
     conn.close()
 
+    log_activity(f"Message from {message.author.display_name} ({message.author.id}): {message.content[:50]}")
+
     await check_role(message.author)
     await bot.process_commands(message)
 
@@ -194,6 +208,7 @@ async def on_voice_state_update(member, before, after):
     if member.bot:
         return
     if before.channel is None and after.channel:
+        log_activity(f"User {member.display_name} ({member.id}) joined voice channel {after.channel.name}")
         bot.loop.create_task(track_voice_time(member))
 
 @bot.command()
