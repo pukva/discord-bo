@@ -237,20 +237,31 @@ async def check(ctx, member: discord.Member = None):
 
 @bot.command()
 async def top(ctx):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time // 60) * 3) DESC LIMIT 5')
-    rows = c.fetchall()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time // 60) * 3) DESC LIMIT 5')
+        rows = c.fetchall()
+        conn.close()
 
-    guild = ctx.guild
-    embed = discord.Embed(title="Топ 5 участников", color=0x00ff00)
-    for i, (user_id, messages, voice_time) in enumerate(rows, 1):
-        member = guild.get_member(user_id)
-        if member:
+        guild = ctx.guild
+        embed = discord.Embed(title="Топ 5 участников", color=0x00ff00)
+        for i, (user_id, messages, voice_time) in enumerate(rows, 1):
+            try:
+                member = await guild.fetch_member(user_id)
+            except discord.NotFound:
+                continue
+
             score = messages + (voice_time // 60) * 3
-            embed.add_field(name=f"{i}. {member.display_name}", value=f"{messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых, оценка: {score}", inline=False)
+            embed.add_field(
+                name=f"{i}. {member.display_name}",
+                value=f"{messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых, оценка: {score}",
+                inline=False
+            )
 
-    await ctx.send(embed=embed)
+        await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send("⚠ Произошла ошибка при выводе топа.")
+        print(f"[ERROR in !top]: {e}")
 
 bot.run(token)
