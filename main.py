@@ -7,6 +7,17 @@ import os
 from dotenv import load_dotenv
 from threading import Thread
 from flask import Flask
+import logging
+
+# ✅ Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("bot.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
 
 # Load token
 load_dotenv()
@@ -37,8 +48,7 @@ AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 
 MESSAGE_THRESHOLD = 50
 VOICE_TIME_THRESHOLD = 250 * 3600
-
-INACTIVE_VOICE_THRESHOLD = 10 * 3600  # 10 часов
+INACTIVE_VOICE_THRESHOLD = 10 * 3600
 TIMER_DURATION = 15
 
 # DB Setup
@@ -92,6 +102,7 @@ async def check_role(member):
                         prev_role_id = r.id
                         await member.remove_roles(r)
                 await member.add_roles(active_role)
+                logging.info(f"Назначена роль активности {member} (user_id={member.id})")
                 conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('UPDATE users SET prev_role_id = ? WHERE user_id = ?', (prev_role_id, member.id))
@@ -99,7 +110,7 @@ async def check_role(member):
                 conn.close()
                 update_timer(member.id)
             except Exception as e:
-                print(e)
+                logging.error(f"Ошибка при назначении роли: {e}", exc_info=True)
         elif has_active and not timer_start:
             update_timer(member.id)
     elif has_active and not timer_start:
@@ -130,8 +141,9 @@ async def check_all_users():
                             old_role = guild.get_role(prev_role_id)
                             if old_role:
                                 await member.add_roles(old_role)
+                        logging.info(f"Снята активная роль с {member} из-за неактивности.")
         except Exception as e:
-            print(f"Ошибка таймера: {e}")
+            logging.error(f"Ошибка в таймере: {e}", exc_info=True)
 
 async def track_voice_time(member):
     while member.voice and member.voice.channel and member.voice.channel.name != AFK_CHANNEL_NAME:
@@ -146,9 +158,9 @@ async def track_voice_time(member):
 
 @bot.event
 async def on_ready():
+    logging.info(f"✅ Бот запущен как {bot.user}")
     print(f"✅ Бот запущен как {bot.user}")
     check_all_users.start()
-    # Запуск отслеживания для тех, кто уже в голосе при старте
     for guild in bot.guilds:
         for member in guild.members:
             if member.voice and member.voice.channel and member.voice.channel.name != AFK_CHANNEL_NAME:
@@ -158,14 +170,10 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
-
-    # Игнорируем команды !stats !top !check
     commands_to_ignore = ['!stats', '!top', '!check']
     if any(message.content.startswith(cmd) for cmd in commands_to_ignore):
         await bot.process_commands(message)
         return
-
-    # Учитываем сообщения с 3 и более символами, картинки, стикеры и гифки
     if len(message.content) >= 3 or message.stickers or message.attachments:
         conn = get_db_connection()
         c = conn.cursor()
@@ -174,7 +182,6 @@ async def on_message(message):
         conn.commit()
         conn.close()
         await check_role(message.author)
-
     await bot.process_commands(message)
 
 @bot.event
@@ -186,6 +193,7 @@ async def on_voice_state_update(member, before, after):
 
 @bot.command()
 async def stats(ctx):
+    logging.info(f"{ctx.author} вызвал !stats")
     conn = get_db_connection()
     c = conn.cursor()
     c.execute('SELECT messages, voice_time FROM users WHERE user_id = ?', (ctx.author.id,))
@@ -200,7 +208,7 @@ async def stats(ctx):
 @bot.command()
 async def check(ctx, member: discord.Member = None):
     member = member or ctx.author
-    # Проверяем, есть ли у пользователя защищённые роли
+    logging.info(f"{ctx.author} вызвал !check на {member}")
     if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
         await ctx.send(f"{member.name}, ты крутой, сиди и дальше чухай жопу.")
         return
@@ -238,6 +246,7 @@ async def check(ctx, member: discord.Member = None):
 @bot.command()
 async def top(ctx):
     try:
+        logging.info(f"{ctx.author} вызвал !top")
         conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time // 60) * 3) DESC LIMIT 5')
@@ -251,7 +260,7 @@ async def top(ctx):
             try:
                 member = await guild.fetch_member(int(user_id))
             except (discord.NotFound, discord.HTTPException):
-                continue  # Пропускаем, если участника не найти
+                continue
 
             messages = messages or 0
             voice_time = voice_time or 0
@@ -266,7 +275,6 @@ async def top(ctx):
         await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send("⚠ Произошла ошибка при выводе топа.")
-        import traceback
-        traceback.print_exc()  # Это покажет полную ошибку в консоли
+        logging.error("Ошибка в команде !top", exc_info=True)
 
 bot.run(token)
