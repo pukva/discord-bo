@@ -163,13 +163,27 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (message.author.id,))
-    c.execute('UPDATE users SET messages = messages + 1 WHERE user_id = ?', (message.author.id,))
-    conn.commit()
-    conn.close()
-    await check_role(message.author)
+
+    # Игнорируем команды (начинаются с !)
+    if message.content.startswith('!'):
+        await bot.process_commands(message)
+        return
+
+    # Проверяем условие для учета сообщения
+    content_len = len(message.content.strip())
+    has_attachments = len(message.attachments) > 0
+    has_stickers = len(message.stickers) > 0
+    has_embeds = len(message.embeds) > 0
+
+    if content_len >= 3 or has_attachments or has_stickers or has_embeds:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (message.author.id,))
+        c.execute('UPDATE users SET messages = messages + 1 WHERE user_id = ?', (message.author.id,))
+        conn.commit()
+        conn.close()
+        await check_role(message.author)
+
     await bot.process_commands(message)
 
 @bot.event
