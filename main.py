@@ -6,32 +6,30 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from threading import Thread
-from flask import Flask, request, abort
+from flask import Flask, Response, request, abort
 
-# Load token
+# Загрузка переменных окружения из .env
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
-# Переменная с названием базы данных (если ещё нет)
-DB_NAME = 'user_stats.db'  # если у тебя в другом месте, не меняй
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+# Переменная с названием базы данных
+DB_NAME = 'user_stats.db'
+
+# Создаем папку для логов, если нет
+os.makedirs("logs", exist_ok=True)
 
 def log_activity(text):
-    os.makedirs("logs", exist_ok=True)  # Создаёт папку logs, если нет
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     with open("logs/activity.log", "a", encoding="utf-8") as f:
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         f.write(f"[{timestamp} UTC] {text}\n")
 
-
+# Flask сервер для логов и админки
 app = Flask('')
-
-def get_db_connection():
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def check_auth():
     password = request.args.get('password')
-    if password != os.getenv("ADMIN_PASSWORD"):
-        from flask import abort
+    if password != ADMIN_PASSWORD:
         abort(403, description="Доступ запрещён")
 
 @app.route('/')
@@ -49,6 +47,11 @@ def view_logs():
         return f"<h2>Логи активности</h2><div style='font-family: monospace;'>{content}</div>"
     except Exception as e:
         return f"<p>Ошибка при чтении логов: {e}</p>"
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 @app.route('/admin/users')
 def admin_users():
@@ -88,35 +91,37 @@ def admin_user_detail(user_id):
     html += f"<a href='/admin/users?password={request.args.get('password')}'>← Назад к списку</a>"
     return html
 
-def run():
+def run_flask():
+    # Можно поменять порт, если нужно
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-Thread(target=run).start()
+# Запускаем Flask в отдельном потоке
+Thread(target=run_flask, daemon=True).start()
+
+# ------------------ Discord Bot ---------------------
 
 # Intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.voice_states = True
+
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# DB and constants
-DB_NAME = 'user_stats.db'
+# Роли и настройки
 ACTIVE_ROLE_ID = 1060759821856555119
 OLD_ROLE_IDS = [1379573779839189022, 1266456229945937983]
 PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]
 AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 
 MESSAGE_THRESHOLD = 50
-VOICE_TIME_THRESHOLD = 250 * 3600
+VOICE_TIME_THRESHOLD = 250 * 3600  # 250 часов в секундах
 
 INACTIVE_VOICE_THRESHOLD = 20 * 3600
-TIMER_DURATION = 15
+TIMER_DURATION = 15  # дней
+INACTIVE_MSG_THRESHOLD = 10  # добавил для проверки, можно настроить
 
-# DB Setup
-def get_db_connection():
-    return sqlite3.connect(DB_NAME, check_same_thread=False)
-
+# Инициализация БД
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
@@ -153,7 +158,7 @@ async def check_role(member):
 
     messages, voice_time, timer_start, prev_role_id = row
     active_role = member.guild.get_role(ACTIVE_ROLE_ID)
-    old_roles = [member.guild.get_role(rid) for rid in OLD_ROLE_IDS]
+    old_roles = [member.guild.get_role(rid) for rid in OLD_ROLE_IDS if member.guild.get_role(rid)]
     has_active = active_role in member.roles if active_role else False
 
     if messages >= MESSAGE_THRESHOLD and voice_time >= VOICE_TIME_THRESHOLD:
@@ -170,8 +175,9 @@ async def check_role(member):
                 conn.commit()
                 conn.close()
                 update_timer(member.id)
+                log_activity(f"Роль активного добавлена пользователю {member.display_name} ({member.id})")
             except Exception as e:
-                print(e)
+                print(f"Ошибка при добавлении роли: {e}")
         elif has_active and not timer_start:
             update_timer(member.id)
     elif has_active and not timer_start:
@@ -186,14 +192,16 @@ async def check_all_users():
     conn.close()
 
     now = datetime.utcnow()
-    guild = discord.utils.get(bot.guilds)
+    if not bot.guilds:
+        return
+    guild = bot.guilds[0]
     for user_id, msg, voice, t_start, prev_role_id in rows:
         try:
             member = guild.get_member(user_id)
             if not member or any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
                 continue
-            t_start = datetime.fromisoformat(t_start)
-            if now - t_start >= timedelta(days=TIMER_DURATION):
+            t_start_dt = datetime.fromisoformat(t_start)
+            if now - t_start_dt >= timedelta(days=TIMER_DURATION):
                 if msg < INACTIVE_MSG_THRESHOLD or voice < INACTIVE_VOICE_THRESHOLD:
                     role = guild.get_role(ACTIVE_ROLE_ID)
                     if role in member.roles:
@@ -202,6 +210,7 @@ async def check_all_users():
                             old_role = guild.get_role(prev_role_id)
                             if old_role:
                                 await member.add_roles(old_role)
+                        log_activity(f"Роль активного снята с пользователя {member.display_name} ({member.id}) за неактивность")
         except Exception as e:
             print(f"Ошибка таймера: {e}")
 
@@ -217,7 +226,6 @@ async def track_voice_time(member):
         await check_role(member)
 
 @bot.event
-@bot.event
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
     check_all_users.start()
@@ -228,29 +236,12 @@ async def on_ready():
                 if member.bot:
                     continue
                 if voice_channel.name != AFK_CHANNEL_NAME:
-                    print(f"▶️ Запуск отслеживания для {member.display_name} (уже в голосе)")
-                    bot.loop.create_task(track_voice_time(member))
+                    asyncio.create_task(track_voice_time(member))
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-
-    # Игнорировать команды !stats !top !check
-    if message.content.startswith('!'):
-        if any(message.content.startswith(cmd) for cmd in ['!stats', '!top', '!check']):
-            await bot.process_commands(message)
-            return
-        # иначе считаем сообщение валидным для подсчета, если >3 символов
-        if len(message.content) < 3:
-            await bot.process_commands(message)
-            return
-    else:
-        # Для обычных сообщений — игнорировать если меньше 3 символов и без вложений
-        if len(message.content) < 3 and not (message.stickers or message.attachments or message.embeds):
-            await bot.process_commands(message)
-            return
-
     conn = get_db_connection()
     c = conn.cursor()
     c.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (message.author.id,))
@@ -265,80 +256,11 @@ async def on_message(message):
 async def on_voice_state_update(member, before, after):
     if member.bot:
         return
-    if before.channel is None and after.channel:
-        bot.loop.create_task(track_voice_time(member))
 
-@bot.command()
-async def stats(ctx, member: discord.Member = None):
-    member = member or ctx.author
-
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('SELECT messages, voice_time FROM users WHERE user_id = ?', (member.id,))
-    row = c.fetchone()
-    conn.close()
-
-    if row:
-        msg, voice = row
-        await ctx.send(f"{member.mention}, у тебя {msg} сообщений и {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
-    else:
-        await ctx.send(f"Данных по {member.display_name} нет.")
-
-@bot.command()
-async def check(ctx, member: discord.Member = None):
-    member = member or ctx.author
-
-    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
-        await ctx.send(f"{member.display_name}, ты крутой, сиди и дальше чухай жопу.")
-        return
-
-    await check_role(member)
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('SELECT messages, voice_time, timer_start FROM users WHERE user_id = ?', (member.id,))
-    row = c.fetchone()
-    conn.close()
-
-    if not row:
-        await ctx.send(f"Нет данных по {member.display_name}.")
-        return
-
-    msg, voice, t_start = row
-    has_role = discord.utils.get(member.roles, id=ACTIVE_ROLE_ID)
-
-    response = f"📊 Статистика {member.display_name}:\n"
-    response += f"— {msg} сообщений\n— {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых\n"
-
-    if has_role:
-        if t_start:
-            delta = datetime.utcnow() - datetime.fromisoformat(t_start)
-            days_left = max(0, TIMER_DURATION - delta.days)
-            response += f"— До снятия роли: {days_left} дней\n"
-            response += f"— Нужно набрать:10 часов в голосе за период"
-        else:
-            response += "— Роль активна, но таймер не запущен."
-    else:
-        response += "— Роль за активность не получена, таймер не запущен."
-
-    await ctx.send(response)
-
-@bot.command()
-async def top(ctx):
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + voice_time / 60 * 3) DESC LIMIT 5')
-    rows = c.fetchall()
-    conn.close()
-    if not rows:
-        await ctx.send("Нет данных для топа.")
-        return
-
-    response = "🏆 Топ по активности:\n"
-    for i, (user_id, messages, voice_time) in enumerate(rows, start=1):
-        member = ctx.guild.get_member(user_id)
-        if member:
-            score = messages + (voice_time // 60) * 3
-            response += f"{i}. {member.display_name} — {messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых (баллы: {score})\n"
-    await ctx.send(response)
+    # Пользователь зашел в канал, отличный от AFK
+    if (before.channel != after.channel):
+        if after.channel and after.channel.name != AFK_CHANNEL_NAME:
+            asyncio.create_task(track_voice_time(member))
+        # Если пользователь вышел из голосового канала или ушёл в AFK, таймер stop автоматически
 
 bot.run(token)
