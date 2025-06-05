@@ -245,23 +245,28 @@ async def top(ctx):
         conn.close()
 
         guild = ctx.guild
-        embed = discord.Embed(title="Топ 5 участников", color=0x00ff00)
+        embed = discord.Embed(title="🏆 Топ 5 участников", color=0x00ff00)
+
         for i, (user_id, messages, voice_time) in enumerate(rows, 1):
             try:
-                member = await guild.fetch_member(user_id)
-            except discord.NotFound:
-                continue
+                member = await guild.fetch_member(int(user_id))
+            except (discord.NotFound, discord.HTTPException):
+                continue  # Пропускаем, если участника не найти
 
+            messages = messages or 0
+            voice_time = voice_time or 0
             score = messages + (voice_time // 60) * 3
+
             embed.add_field(
                 name=f"{i}. {member.display_name}",
-                value=f"{messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых, оценка: {score}",
+                value=f"{messages} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых\nОценка: {score}",
                 inline=False
             )
 
         await ctx.send(embed=embed)
     except Exception as e:
         await ctx.send("⚠ Произошла ошибка при выводе топа.")
-        print(f"[ERROR in !top]: {e}")
+        import traceback
+        traceback.print_exc()  # Это покажет полную ошибку в консоли
 
 bot.run(token)
