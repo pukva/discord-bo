@@ -7,7 +7,6 @@ import os
 from dotenv import load_dotenv
 from threading import Thread
 from flask import Flask
-from threading import Thread
 
 app = Flask('')  # только один раз!
 
@@ -17,7 +16,6 @@ def home():
 
 @app.route('/users')
 def users():
-    import sqlite3
     conn = sqlite3.connect('user_stats.db')
     cursor = conn.cursor()
     cursor.execute("SELECT user_id, username, messages FROM users")
