@@ -7,19 +7,16 @@ import os
 from dotenv import load_dotenv
 from threading import Thread
 from flask import Flask, render_template
+import sqlite3
+import logging
 
-# Название базы данных
-DB_NAME = 'user_stats.db'
+app = Flask(__name__)
 
-# Load token
-load_dotenv()
-token = os.getenv("DISCORD_TOKEN")
-
-# Flask сервер (для keep-alive и страницы пользователей)
-app = Flask('')
+# Настройка логирования
+logging.basicConfig(filename='flask_errors.log', level=logging.DEBUG)
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+    conn = sqlite3.connect('user_stats.db', check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -29,16 +26,20 @@ def home():
 
 @app.route('/users')
 def users():
-    conn = get_db_connection()
-    users = conn.execute('SELECT user_id, messages, voice_time FROM users').fetchall()
-    print(f"Найдено пользователей: {len(users)}")  # Отладка
-    for user in users:
-        print(f"User: {user['user_id']}, Messages: {user['messages']}, Voice Time: {user['voice_time']}")  # Отладка
-    conn.close()
-    return render_template('users.html', users=users)
+    try:
+        conn = get_db_connection()
+        users = conn.execute('SELECT user_id, messages, voice_time FROM users').fetchall()
+        logging.debug(f"Найдено пользователей: {len(users)}")
+        for user in users:
+            logging.debug(f"User: {user['user_id']}, Messages: {user['messages']}, Voice Time: {user['voice_time']}")
+        conn.close()
+        return render_template('users.html', users=users)
+    except Exception as e:
+        logging.error(f"Ошибка в маршруте /users: {str(e)}")
+        return f"Ошибка сервера: {str(e)}", 500
 
 def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)), debug=True)
 
 Thread(target=run_flask).start()
 
