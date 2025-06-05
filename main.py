@@ -85,6 +85,10 @@ async def check_role(member):
     old_roles = [member.guild.get_role(rid) for rid in OLD_ROLE_IDS]
     has_active = active_role in member.roles if active_role else False
 
+    # Проверка на защищённые роли
+    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+        return  # не трогаем защищённых
+
     if messages >= MESSAGE_THRESHOLD and voice_time >= VOICE_TIME_THRESHOLD:
         if active_role and not has_active:
             try:
@@ -149,12 +153,11 @@ async def track_voice_time(member):
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
     check_all_users.start()
-
-    # Запускаем таймер для всех в голосовых каналах (кроме AFK) при старте бота
-    for guild in bot.guilds:
-        for member in guild.members:
-            if member.voice and member.voice.channel and member.voice.channel.name != AFK_CHANNEL_NAME and not member.bot:
-                bot.loop.create_task(track_voice_time(member))
+    # Запускаем слежение за голосом для всех в голосовых, кроме AFK
+    guild = discord.utils.get(bot.guilds)
+    for member in guild.members:
+        if member.voice and member.voice.channel and member.voice.channel.name != AFK_CHANNEL_NAME and not member.bot:
+            bot.loop.create_task(track_voice_time(member))
 
 @bot.event
 async def on_message(message):
@@ -173,7 +176,6 @@ async def on_message(message):
 async def on_voice_state_update(member, before, after):
     if member.bot:
         return
-    # Запускаем трекинг, когда пользователь заходит в голосовой канал
     if before.channel is None and after.channel:
         bot.loop.create_task(track_voice_time(member))
 
@@ -186,13 +188,18 @@ async def stats(ctx):
     conn.close()
     if row:
         msg, voice = row
-        await ctx.send(f"У пользователя {ctx.author.name} {msg} сообщений и {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
+        await ctx.send(f"{ctx.author.name}, у тебя {msg} сообщений и {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых.")
     else:
         await ctx.send("Данных нет.")
 
 @bot.command()
 async def check(ctx, member: discord.Member = None):
     member = member or ctx.author
+    # Если есть защищённые роли — шлём "ты крутой, сиди и дальше чухай жопу"
+    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+        await ctx.send(f"{member.name}, ты крутой, сиди и дальше чухай жопу.")
+        return
+
     await check_role(member)
     conn = get_db_connection()
     c = conn.cursor()
@@ -201,13 +208,13 @@ async def check(ctx, member: discord.Member = None):
     conn.close()
 
     if not row:
-        await ctx.send(f"Нет данных по пользователю {member.name}.")
+        await ctx.send(f"Нет данных по {member.name}.")
         return
 
     msg, voice, t_start = row
     has_role = discord.utils.get(member.roles, id=ACTIVE_ROLE_ID)
 
-    response = f"📊 Статистика пользователя {member.name}:\n"
+    response = f"📊 Статистика {member.name}:\n"
     response += f"— {msg} сообщений\n— {voice // 3600} ч {(voice % 3600) // 60} мин в голосовых\n"
 
     if has_role:
@@ -227,17 +234,31 @@ async def check(ctx, member: discord.Member = None):
 async def top(ctx):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + voice_time / 60) DESC LIMIT 5')
+    c.execute('SELECT user_id, messages, voice_time FROM users')
     rows = c.fetchall()
     conn.close()
+    
     if not rows:
         await ctx.send("Нет данных для топа.")
         return
+    
+    scored = []
+    for uid, msg_count, voice_time_sec in rows:
+        voice_time_min = voice_time_sec // 60
+        score = msg_count + voice_time_min * 3
+        scored.append((uid, msg_count, voice_time_sec, score))
+    
+    scored.sort(key=lambda x: x[3], reverse=True)
+    
+    top_five = scored[:5]
+    
     msg = "**🏆 Топ пользователей:**\n"
-    for i, (uid, msg_count, voice_time) in enumerate(rows, 1):
+    for i, (uid, msg_count, voice_time_sec, score) in enumerate(top_five, 1):
         user = ctx.guild.get_member(uid)
         if user:
-            msg += f"{i}. {user.name} — {msg_count} сообщений, {voice_time // 3600} ч {(voice_time % 3600) // 60} мин в голосовых\n"
+            hours = voice_time_sec // 3600
+            minutes = (voice_time_sec % 3600) // 60
+            msg += f"{i}. {user.name} — {msg_count} сообщений, {hours} ч {minutes} мин в голосовых (оценка: {score})\n"
     await ctx.send(msg)
 
 bot.run(token)
