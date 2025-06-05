@@ -6,26 +6,91 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from threading import Thread
-from flask import Flask
+from flask import Flask, request, abort
 
 # Load token
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
+# Переменная с названием базы данных (если ещё нет)
+DB_NAME = 'user_stats.db'  # если у тебя в другом месте, не меняй
 
-# --- Логирование ---
 def log_activity(text):
-    os.makedirs("logs", exist_ok=True)
+    os.makedirs("logs", exist_ok=True)  # Создаёт папку logs, если нет
     with open("logs/activity.log", "a", encoding="utf-8") as f:
         timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         f.write(f"[{timestamp} UTC] {text}\n")
 
-# Flask server (for keep-alive)
+
 app = Flask('')
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def check_auth():
+    password = request.args.get('password')
+    if password != os.getenv("ADMIN_PASSWORD"):
+        from flask import abort
+        abort(403, description="Доступ запрещён")
+
 @app.route('/')
 def home():
     return "Бот работает!"
+
+@app.route('/logs')
+def view_logs():
+    check_auth()
+    try:
+        with open("logs/activity.log", "r", encoding='utf-8') as f:
+            lines = f.readlines()
+        lines = lines[-100:]  # последние 100 строк
+        content = "<br>".join(line.strip() for line in lines)
+        return f"<h2>Логи активности</h2><div style='font-family: monospace;'>{content}</div>"
+    except Exception as e:
+        return f"<p>Ошибка при чтении логов: {e}</p>"
+
+@app.route('/admin/users')
+def admin_users():
+    check_auth()
+    conn = get_db_connection()
+    users = conn.execute('SELECT user_id, messages, voice_time FROM users ORDER BY messages + voice_time DESC').fetchall()
+    conn.close()
+
+    html = "<h2>Пользователи</h2>"
+    html += "<table border=1 cellpadding=5><tr><th>ID</th><th>Сообщений</th><th>Войс, ч</th></tr>"
+    for user in users:
+        voice_hours = user['voice_time'] // 3600
+        html += f"<tr><td><a href='/admin/user/{user['user_id']}?password={request.args.get('password')}'>{user['user_id']}</a></td><td>{user['messages']}</td><td>{voice_hours}</td></tr>"
+    html += "</table>"
+    return html
+
+@app.route('/admin/user/<int:user_id>')
+def admin_user_detail(user_id):
+    check_auth()
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE user_id = ?', (user_id,)).fetchone()
+    conn.close()
+
+    if not user:
+        return f"Пользователь с ID {user_id} не найден", 404
+
+    voice_hours = user['voice_time'] // 3600
+    voice_minutes = (user['voice_time'] % 3600) // 60
+
+    html = f"<h2>Детальная статистика пользователя {user_id}</h2>"
+    html += f"<ul>"
+    html += f"<li>Сообщений: {user['messages']}</li>"
+    html += f"<li>Время в голосе: {voice_hours} ч {voice_minutes} мин</li>"
+    html += f"<li>Таймер старт: {user['timer_start']}</li>"
+    html += f"<li>Предыдущая роль: {user['prev_role_id']}</li>"
+    html += "</ul>"
+    html += f"<a href='/admin/users?password={request.args.get('password')}'>← Назад к списку</a>"
+    return html
+
 def run():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
 Thread(target=run).start()
 
 # Intents
@@ -75,7 +140,6 @@ def update_timer(user_id):
     c.execute('UPDATE users SET timer_start = ? WHERE user_id = ?', (now, user_id))
     conn.commit()
     conn.close()
-    log_activity(f"Timer updated for user {user_id}")
 
 async def check_role(member):
     conn = get_db_connection()
@@ -100,7 +164,6 @@ async def check_role(member):
                         prev_role_id = r.id
                         await member.remove_roles(r)
                 await member.add_roles(active_role)
-                log_activity(f"User {member.display_name} ({member.id}) granted Active role")
                 conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('UPDATE users SET prev_role_id = ? WHERE user_id = ?', (prev_role_id, member.id))
@@ -108,7 +171,6 @@ async def check_role(member):
                 conn.close()
                 update_timer(member.id)
             except Exception as e:
-                log_activity(f"Error granting role to {member.display_name} ({member.id}): {e}")
                 print(e)
         elif has_active and not timer_start:
             update_timer(member.id)
@@ -132,17 +194,15 @@ async def check_all_users():
                 continue
             t_start = datetime.fromisoformat(t_start)
             if now - t_start >= timedelta(days=TIMER_DURATION):
-                if msg < MESSAGE_THRESHOLD or voice < INACTIVE_VOICE_THRESHOLD:
+                if msg < INACTIVE_MSG_THRESHOLD or voice < INACTIVE_VOICE_THRESHOLD:
                     role = guild.get_role(ACTIVE_ROLE_ID)
                     if role in member.roles:
                         await member.remove_roles(role)
-                        log_activity(f"User {member.display_name} ({member.id}) lost Active role due to inactivity")
                         if prev_role_id:
                             old_role = guild.get_role(prev_role_id)
                             if old_role:
                                 await member.add_roles(old_role)
         except Exception as e:
-            log_activity(f"Timer error for user {user_id}: {e}")
             print(f"Ошибка таймера: {e}")
 
 async def track_voice_time(member):
@@ -157,9 +217,9 @@ async def track_voice_time(member):
         await check_role(member)
 
 @bot.event
+@bot.event
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
-    log_activity(f"Bot started as {bot.user}")
     check_all_users.start()
 
     for guild in bot.guilds:
@@ -168,7 +228,7 @@ async def on_ready():
                 if member.bot:
                     continue
                 if voice_channel.name != AFK_CHANNEL_NAME:
-                    log_activity(f"Start tracking voice time for {member.display_name} ({member.id}) on bot start")
+                    print(f"▶️ Запуск отслеживания для {member.display_name} (уже в голосе)")
                     bot.loop.create_task(track_voice_time(member))
 
 @bot.event
@@ -198,8 +258,6 @@ async def on_message(message):
     conn.commit()
     conn.close()
 
-    log_activity(f"Message from {message.author.display_name} ({message.author.id}): {message.content[:50]}")
-
     await check_role(message.author)
     await bot.process_commands(message)
 
@@ -208,7 +266,6 @@ async def on_voice_state_update(member, before, after):
     if member.bot:
         return
     if before.channel is None and after.channel:
-        log_activity(f"User {member.display_name} ({member.id}) joined voice channel {after.channel.name}")
         bot.loop.create_task(track_voice_time(member))
 
 @bot.command()
