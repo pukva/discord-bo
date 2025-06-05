@@ -32,7 +32,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 DB_NAME = 'user_stats.db'
 ACTIVE_ROLE_ID = 1060759821856555119
 OLD_ROLE_IDS = [1379573779839189022, 1266456229945937983]
-PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]
+PROTECTED_ROLE_IDS = [1279364611052802130, 1244606735780675657, 1060759139002896525, 1060755422006485075]  # Роли, которые не трогаем
 AFK_CHANNEL_NAME = "💤 | ᴀꜱᴋ"
 
 MESSAGE_THRESHOLD = 50
@@ -85,6 +85,10 @@ async def check_role(member):
     old_roles = [member.guild.get_role(rid) for rid in OLD_ROLE_IDS]
     has_active = active_role in member.roles if active_role else False
 
+    if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+        # Пользователь с защищенной ролью — не трогаем, но можно отправить "ты крутой" в !check
+        return
+
     if messages >= MESSAGE_THRESHOLD and voice_time >= VOICE_TIME_THRESHOLD:
         if active_role and not has_active:
             try:
@@ -115,27 +119,26 @@ async def check_all_users():
     conn.close()
 
     now = datetime.utcnow()
-    guild = discord.utils.get(bot.guilds)
-    for user_id, msg, voice, t_start, prev_role_id in rows:
-        try:
-            member = guild.get_member(user_id)
-            if not member or any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
-                continue
-            t_start = datetime.fromisoformat(t_start)
-            if now - t_start >= timedelta(days=TIMER_DURATION):
-                if msg < INACTIVE_MSG_THRESHOLD or voice < INACTIVE_VOICE_THRESHOLD:
-                    role = guild.get_role(ACTIVE_ROLE_ID)
-                    if role in member.roles:
-                        await member.remove_roles(role)
-                        if prev_role_id:
-                            old_role = guild.get_role(prev_role_id)
-                            if old_role:
-                                await member.add_roles(old_role)
-        except Exception as e:
-            print(f"Ошибка таймера: {e}")
+    for guild in bot.guilds:
+        for user_id, msg, voice, t_start, prev_role_id in rows:
+            try:
+                member = guild.get_member(user_id)
+                if not member or any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+                    continue
+                t_start = datetime.fromisoformat(t_start)
+                if now - t_start >= timedelta(days=TIMER_DURATION):
+                    if msg < INACTIVE_MSG_THRESHOLD or voice < INACTIVE_VOICE_THRESHOLD:
+                        role = guild.get_role(ACTIVE_ROLE_ID)
+                        if role in member.roles:
+                            await member.remove_roles(role)
+                            if prev_role_id:
+                                old_role = guild.get_role(prev_role_id)
+                                if old_role:
+                                    await member.add_roles(old_role)
+            except Exception as e:
+                print(f"Ошибка таймера: {e}")
 
 async def track_voice_time(member):
-    # Цикл идет пока пользователь в голосовом канале (и не в AFK)
     while member.voice and member.voice.channel and member.voice.channel.name != AFK_CHANNEL_NAME:
         await asyncio.sleep(60)
         conn = get_db_connection()
@@ -150,11 +153,31 @@ async def track_voice_time(member):
 async def on_ready():
     print(f"✅ Бот запущен как {bot.user}")
 
-    # Запускаем таск проверки пользователей раз в сутки
     check_all_users.start()
 
-    # Запускаем таймер голосового времени для всех, кто уже в голосовых каналах (кроме AFK)
     for guild in bot.guilds:
+        for member in guild.members:
+            if member.bot:
+                continue
+            if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
+                continue
+
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute('SELECT timer_start FROM users WHERE user_id = ?', (member.id,))
+            row = c.fetchone()
+
+            if not row:
+                c.execute('INSERT OR IGNORE INTO users (user_id, messages, voice_time, timer_start) VALUES (?, 0, 0, ?)', (member.id, datetime.utcnow().isoformat()))
+                conn.commit()
+            else:
+                timer_start = row[0]
+                if not timer_start:
+                    c.execute('UPDATE users SET timer_start = ? WHERE user_id = ?', (datetime.utcnow().isoformat(), member.id))
+                    conn.commit()
+            conn.close()
+
+        # Запускаем таймер для всех в голосовых каналах (кроме AFK)
         for voice_channel in guild.voice_channels:
             if voice_channel.name == AFK_CHANNEL_NAME:
                 continue
@@ -180,7 +203,6 @@ async def on_voice_state_update(member, before, after):
     if member.bot:
         return
     if before.channel is None and after.channel:
-        # Пользователь только что зашел в голосовой канал
         bot.loop.create_task(track_voice_time(member))
 
 @bot.command()
@@ -200,9 +222,8 @@ async def stats(ctx):
 async def check(ctx, member: discord.Member = None):
     member = member or ctx.author
 
-    # Проверяем защищенные роли
     if any(r.id in PROTECTED_ROLE_IDS for r in member.roles):
-        await ctx.send(f"{member.mention}, ты крутой, сиди и дальше чухай жопу 😎")
+        await ctx.send(f"{member.mention}, ты крутой, сиди и дальше чухай жопу.")
         return
 
     await check_role(member)
