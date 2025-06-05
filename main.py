@@ -6,7 +6,8 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from threading import Thread
-from flask import Flask
+ffrom flask import Flask
+from threading import Thread
 
 app = Flask('')  # только один раз!
 
@@ -16,16 +17,7 @@ def home():
 
 @app.route('/users')
 def users():
-    conn = sqlite3.connect('user_stats.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id, username, messages FROM users")
-    rows = cursor.fetchall()
-    conn.close()
-    html = "<table border='1'><tr><th>ID</th><th>Username</th><th>Messages</th></tr>"
-    for row in rows:
-        html += f"<tr><td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td></tr>"
-    html += "</table>"
-    return html
+    return "ТЕСТ: /users работает!"
 
 def run():
     app.run(host="0.0.0.0", port=8080, debug=True)
