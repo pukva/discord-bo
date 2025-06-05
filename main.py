@@ -6,19 +6,9 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from threading import Thread
-from flask import Flask, render_template_string
-import sqlite3
-
-app = Flask('')
-
-# Load token
-load_dotenv()
-token = os.getenv("DISCORD_TOKEN")
-
 from flask import Flask
-from threading import Thread
 
-app = Flask('')
+app = Flask('')  # Только один раз создаём app!
 app.debug = True
 
 @app.route('/')
@@ -27,7 +17,6 @@ def home():
 
 @app.route("/users")
 def users():
-    import sqlite3
     conn = sqlite3.connect('user_stats.db')
     cursor = conn.cursor()
     cursor.execute("SELECT user_id, username, messages FROM users")
