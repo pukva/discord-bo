@@ -29,7 +29,7 @@ app = Flask('')
 def home():
     return "Бот работает!"
 def run():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8081)))
 Thread(target=run).start()
 
 # Intents
