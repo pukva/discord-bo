@@ -31,6 +31,9 @@ def home():
 def users():
     conn = get_db_connection()
     users = conn.execute('SELECT user_id, messages, voice_time FROM users').fetchall()
+    print(f"Найдено пользователей: {len(users)}")  # Отладка
+    for user in users:
+        print(f"User: {user['user_id']}, Messages: {user['messages']}, Voice Time: {user['voice_time']}")  # Отладка
     conn.close()
     return render_template('users.html', users=users)
 
