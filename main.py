@@ -245,10 +245,9 @@ async def check(ctx, member: discord.Member = None):
 async def top(ctx):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + (voice_time/60)*3) DESC LIMIT 5')
+    c.execute('SELECT user_id, messages, voice_time FROM users ORDER BY (messages + voice_time / 60 * 3) DESC LIMIT 5')
     rows = c.fetchall()
     conn.close()
-
     if not rows:
         await ctx.send("Нет данных для топа.")
         return
