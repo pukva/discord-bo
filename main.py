@@ -46,8 +46,6 @@ def users():
     </table>
     """
     return render_template_string(table, users=users_list)
-def run():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 Thread(target=run).start()
 
 # Intents
